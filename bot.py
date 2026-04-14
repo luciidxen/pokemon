@@ -150,8 +150,7 @@ async def checkstock(interaction: discord.Interaction):
         embed.add_field(name=name, value=value, inline=False)
     await interaction.followup.send(embed=embed)
 
-# Per-product dropdowns
-@tree.command(name="addproduct", description="Add a product to your monitor list")
+@tree.command(name="addproduct", description="Add a product to your personal monitor list")
 @app_commands.choices(product=[app_commands.Choice(name=name, value=name) for name in PRODUCTS.keys()])
 async def addproduct(interaction: discord.Interaction, product: str):
     await interaction.response.defer(ephemeral=True)
@@ -164,7 +163,7 @@ async def addproduct(interaction: discord.Interaction, product: str):
     if product not in monitored[user_id]["products"]:
         monitored[user_id]["products"].append(product)
         save_data()
-        await interaction.followup.send(f"✅ Added **{product}**", ephemeral=True)
+        await interaction.followup.send(f"✅ Added **{product}** to monitoring", ephemeral=True)
     else:
         await interaction.followup.send(f"✅ Already monitoring **{product}**", ephemeral=True)
 
@@ -188,7 +187,7 @@ async def myproducts(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
     user_id = str(interaction.user.id)
     if user_id not in monitored or not monitored[user_id].get("products"):
-        await interaction.followup.send("❌ No products selected.\nUse /addproduct", ephemeral=True)
+        await interaction.followup.send("❌ No products selected yet.\nUse /addproduct", ephemeral=True)
         return
     await interaction.followup.send("**Your monitored products:**\n" + "\n".join(f"• {p}" for p in monitored[user_id]["products"]), ephemeral=True)
 
@@ -208,11 +207,11 @@ async def monitor(interaction: discord.Interaction, action: str, interval: int):
             return
         monitored[user_id] = {"zip": user_zips[user_id], "interval": interval, "products": []}
         save_data()
-        await interaction.followup.send(f"✅ Monitoring ON — every **{interval} minutes**", ephemeral=False)
+        await interaction.followup.send(f"✅ Monitoring **ON** — every **{interval} minutes**", ephemeral=False)
     else:
         monitored.pop(user_id, None)
         save_data()
-        await interaction.followup.send("✅ Monitoring OFF", ephemeral=True)
+        await interaction.followup.send("✅ Monitoring **OFF**", ephemeral=True)
 
 @tasks.loop(minutes=1)
 async def stock_monitor():
@@ -252,6 +251,6 @@ async def stock_monitor():
 async def on_ready():
     await tree.sync()
     stock_monitor.start()
-    print(f"✅ Bot online — {client.user} | Per-product selection + price tracking")
+    print(f"✅ Bot online — {client.user} | All commands + price tracking + per-product selection")
 
 client.run(os.getenv("TOKEN"))
