@@ -12,6 +12,7 @@ tree = app_commands.CommandTree(client)
 
 DATA_FILE = "bot_data.json"
 
+# Load data
 if os.path.exists(DATA_FILE):
     with open(DATA_FILE, "r") as f:
         data = json.load(f)
@@ -25,38 +26,29 @@ else:
     last_stock = {}
     last_check = {}
 
-for uid, val in list(monitored.items()):
-    if isinstance(val, str):
-        monitored[uid] = {"zip": val, "interval": 10}
-    elif isinstance(val, dict) and "interval" not in val:
-        val["interval"] = 10
-
 def save_data():
     with open(DATA_FILE, "w") as f:
         json.dump({"zips": user_zips, "monitored": monitored, "last_stock": last_stock, "last_check": last_check}, f)
 
-# Maximized products
+# Maximized products (update IDs when new sets drop)
 PRODUCTS = {
-    "Surging Sparks ETB": {"target": "1010148053", "walmart": "18981958891", "gamestop": "20030148", "bestbuy": "12161102", "amazon": "B0D8K7L9P2", "dicks": "p-12345678", "pokemoncenter": "https://www.pokemoncenter.com/product/191-85953"},
-    "Prismatic Evolutions ETB": {"target": "95230445", "walmart": "18981958891", "gamestop": "20030148", "bestbuy": "12161102", "amazon": "B0D8K7L9P2", "dicks": "p-12345678", "pokemoncenter": "https://www.pokemoncenter.com/product/100-10019"},
-    "Stellar Crown ETB": {"target": "1009318921", "walmart": "18981958891", "gamestop": "20030148", "bestbuy": "12161102", "amazon": "B0D8K7L9P2", "dicks": "p-12345678", "pokemoncenter": "https://www.pokemoncenter.com/product/190-85923"},
-    "Surging Sparks Booster Bundle": {"target": "1010148060", "walmart": "18981958900", "gamestop": "20030149", "bestbuy": "12161103", "amazon": "B0D8K7L9P3", "dicks": "p-12345679", "pokemoncenter": "https://www.pokemoncenter.com/product/191-85954"},
-    "Pokémon Day 2026 Collection": {"target": "1009318921", "walmart": "18981958891", "gamestop": "20030148", "bestbuy": "12161102", "amazon": "B0D8K7L9P2", "dicks": "p-12345678", "pokemoncenter": "https://www.pokemoncenter.com/product/10-10394-108"},
+    "Surging Sparks ETB": {"target": "1010148053", "walmart": "18981958891", "gamestop": "20030148", "bestbuy": "6574523", "amazon": "B0D8K7L9P2", "dicks": "p-12345678", "pokemoncenter": "https://www.pokemoncenter.com/product/191-85953"},
+    "Prismatic Evolutions ETB": {"target": "95230445", "walmart": "18981958891", "gamestop": "20030148", "bestbuy": "6574524", "amazon": "B0D8K7L9P2", "dicks": "p-12345678", "pokemoncenter": "https://www.pokemoncenter.com/product/100-10019"},
+    "Stellar Crown ETB": {"target": "1009318921", "walmart": "18981958891", "gamestop": "20030148", "bestbuy": "6574525", "amazon": "B0D8K7L9P2", "dicks": "p-12345678", "pokemoncenter": "https://www.pokemoncenter.com/product/190-85923"},
+    "Surging Sparks Booster Bundle": {"target": "1010148060", "walmart": "18981958900", "gamestop": "20030149", "bestbuy": "6574526", "amazon": "B0D8K7L9P3", "dicks": "p-12345679", "pokemoncenter": "https://www.pokemoncenter.com/product/191-85954"},
+    "Pokémon Day 2026 Collection": {"target": "1009318921", "walmart": "18981958891", "gamestop": "20030148", "bestbuy": "6574527", "amazon": "B0D8K7L9P2", "dicks": "p-12345678", "pokemoncenter": "https://www.pokemoncenter.com/product/10-10394-108"},
 }
 
-# Full check functions (7 retailers)
 def check_target_stock(zip_code, tcin):
     try:
         r = requests.get("https://redsky.target.com/redsky_aggregations/v1/web/product_summary_with_fulfillment_v1",
-                         params={"key": "9f36aeafbe60771e321a7cc95a78140772ab3e96", "tcins": tcin, "zip": zip_code, "radius": "50", "channel": "WEB"},
+                         params={"key": "9f36aeafbe60771e321a7cc95a78140772ab3e96", "tcins": tcin, "zip": zip_code, "radius": "50"},
                          headers={"User-Agent": "Mozilla/5.0"}, timeout=6)
         if r.status_code != 200: return "❌ API error"
         data = r.json()
         for p in data.get("products", []):
-            for opt in p.get("fulfillment", {}).get("fulfillment_options", []):
-                if opt.get("availability_status") == "IN_STOCK": return "✅ IN STOCK"
-            for s in p.get("fulfillment", {}).get("stores", []):
-                if s.get("availability_status") == "IN_STOCK": return "✅ IN STOCK"
+            if any(opt.get("availability_status") == "IN_STOCK" for opt in p.get("fulfillment", {}).get("fulfillment_options", [])):
+                return "✅ IN STOCK"
         return "❌ Out of stock"
     except:
         return "❌ API error"
@@ -77,9 +69,8 @@ def check_gamestop_stock(sku):
 
 def check_bestbuy_stock(zip_code, sku):
     try:
-        r = requests.get(f"https://www.bestbuy.com/api/3.0/availability/{sku}?postalCode={zip_code}", headers={"User-Agent": "Mozilla/5.0"}, timeout=6)
-        data = r.json()
-        return "✅ IN STOCK" if data.get("availability", {}).get("inStock") else "❌ Out of stock"
+        r = requests.get(f"https://www.bestbuy.com/site/{sku}.p", headers={"User-Agent": "Mozilla/5.0"}, timeout=6)
+        return "✅ IN STOCK" if any(x in r.text.lower() for x in ["add to cart", "in stock"]) else "❌ Out of stock"
     except:
         return "❌ API error"
 
@@ -108,7 +99,7 @@ def check_pokemoncenter_stock(url):
 async def setzip(interaction: discord.Interaction, zip_code: str):
     await interaction.response.defer(ephemeral=True)
     if not zip_code.isdigit() or len(zip_code) != 5:
-        await interaction.followup.send("❌ Use 5-digit ZIP", ephemeral=True)
+        await interaction.followup.send("❌ 5-digit ZIP only", ephemeral=True)
         return
     user_zips[str(interaction.user.id)] = zip_code
     save_data()
@@ -139,6 +130,6 @@ async def checkstock(interaction: discord.Interaction):
 @client.event
 async def on_ready():
     await tree.sync()
-    print(f"✅ Bot online — {client.user} | Full multi-store version active")
+    print(f"✅ Bot online — {client.user} | Full 7-store version active")
 
 client.run(os.getenv("TOKEN"))
