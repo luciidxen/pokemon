@@ -56,7 +56,8 @@ async def fetch(url, params=None, timeout=4):
                 proxies={"http": proxy, "https": proxy},
                 timeout=timeout
             )
-        except:
+        except Exception as e:
+            print(f"Proxy error: {e}")  # for debugging
             return None
 
 async def check_target_stock(zip_code, tcin):
