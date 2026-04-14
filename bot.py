@@ -43,23 +43,17 @@ PRODUCTS = {
     "Pokémon Day 2026 Collection": {"target": "1009318921", "walmart": "18981958891", "gamestop": "20030148", "bestbuy": "6574527", "amazon": "B0D8K7L9P2", "dicks": "p-12345678", "pokemoncenter": "https://www.pokemoncenter.com/product/10-10394-108"},
 }
 
-# Helper to build retailer URLs
 def get_retailer_url(retailer, id_value):
-    if retailer == "target":
-        return f"https://www.target.com/p/-/A-{id_value}"
-    elif retailer == "walmart":
-        return f"https://www.walmart.com/ip/{id_value}"
-    elif retailer == "gamestop":
-        return f"https://www.gamestop.com/product/{id_value}"
-    elif retailer == "bestbuy":
-        return f"https://www.bestbuy.com/site/{id_value}.p"
-    elif retailer == "amazon":
-        return f"https://www.amazon.com/dp/{id_value}"
-    elif retailer == "dicks":
-        return f"https://www.dickssportinggoods.com/p/{id_value}"
-    elif retailer == "pokemoncenter":
-        return id_value
-    return "#"
+    urls = {
+        "target": f"https://www.target.com/p/-/A-{id_value}",
+        "walmart": f"https://www.walmart.com/ip/{id_value}",
+        "gamestop": f"https://www.gamestop.com/product/{id_value}",
+        "bestbuy": f"https://www.bestbuy.com/site/{id_value}.p",
+        "amazon": f"https://www.amazon.com/dp/{id_value}",
+        "dicks": f"https://www.dickssportinggoods.com/p/{id_value}",
+        "pokemoncenter": id_value
+    }
+    return urls.get(retailer, "#")
 
 semaphore = asyncio.Semaphore(8)
 
@@ -76,7 +70,6 @@ async def fetch(url, params=None, timeout=6):
                 await asyncio.sleep(0.5)
         return None
 
-# Check functions (same as before)
 async def check_target_stock(zip_code, tcin):
     r = await fetch("https://redsky.target.com/redsky_aggregations/v1/web/product_summary_with_fulfillment_v1", {"key": "9f36aeafbe60771e321a7cc95a78140772ab3e96", "tcins": tcin, "zip": zip_code, "radius": "50"})
     if not r or r.status_code != 200: return "❌ API error", "N/A"
@@ -183,25 +176,107 @@ async def checkstock(interaction: discord.Interaction):
         embed.add_field(name=name, value=value, inline=False)
     await interaction.followup.send(embed=embed)
 
-def get_retailer_url(retailer, id_value):
-    urls = {
-        "target": f"https://www.target.com/p/-/A-{id_value}",
-        "walmart": f"https://www.walmart.com/ip/{id_value}",
-        "gamestop": f"https://www.gamestop.com/product/{id_value}",
-        "bestbuy": f"https://www.bestbuy.com/site/{id_value}.p",
-        "amazon": f"https://www.amazon.com/dp/{id_value}",
-        "dicks": f"https://www.dickssportinggoods.com/p/{id_value}",
-        "pokemoncenter": id_value
-    }
-    return urls.get(retailer, "#")
+@tree.command(name="addproduct", description="Add a product to your monitor list")
+@app_commands.choices(product=[app_commands.Choice(name=name, value=name) for name in PRODUCTS.keys()])
+async def addproduct(interaction: discord.Interaction, product: str):
+    await interaction.response.defer(ephemeral=True)
+    user_id = str(interaction.user.id)
+    if user_id not in monitored:
+        await interaction.followup.send("❌ Use /monitor on first!", ephemeral=True)
+        return
+    if "products" not in monitored[user_id]:
+        monitored[user_id]["products"] = []
+    if product not in monitored[user_id]["products"]:
+        monitored[user_id]["products"].append(product)
+        save_data()
+        await interaction.followup.send(f"✅ Added **{product}**", ephemeral=True)
+    else:
+        await interaction.followup.send(f"✅ Already monitoring **{product}**", ephemeral=True)
 
-# Per-product commands and background monitor remain the same as last version
-# (addproduct, removeproduct, myproducts, monitor, stock_monitor)
+@tree.command(name="removeproduct", description="Remove a product from your monitor list")
+@app_commands.choices(product=[app_commands.Choice(name=name, value=name) for name in PRODUCTS.keys()])
+async def removeproduct(interaction: discord.Interaction, product: str):
+    await interaction.response.defer(ephemeral=True)
+    user_id = str(interaction.user.id)
+    if user_id not in monitored or "products" not in monitored[user_id]:
+        await interaction.followup.send("❌ Nothing to remove", ephemeral=True)
+        return
+    if product in monitored[user_id]["products"]:
+        monitored[user_id]["products"].remove(product)
+        save_data()
+        await interaction.followup.send(f"✅ Removed **{product}**", ephemeral=True)
+    else:
+        await interaction.followup.send(f"✅ **{product}** not in your list", ephemeral=True)
+
+@tree.command(name="myproducts", description="Show your selected products")
+async def myproducts(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    user_id = str(interaction.user.id)
+    if user_id not in monitored or not monitored[user_id].get("products"):
+        await interaction.followup.send("❌ No products selected yet.\nUse /addproduct", ephemeral=True)
+        return
+    await interaction.followup.send("**Your monitored products:**\n" + "\n".join(f"• {p}" for p in monitored[user_id]["products"]), ephemeral=True)
+
+@tree.command(name="monitor", description="Turn monitoring on/off + interval")
+@app_commands.choices(
+    action=[app_commands.Choice(name="on", value="on"), app_commands.Choice(name="off", value="off")],
+    interval=[app_commands.Choice(name="1 min", value=1), app_commands.Choice(name="3 min", value=3),
+              app_commands.Choice(name="5 min", value=5), app_commands.Choice(name="10 min", value=10),
+              app_commands.Choice(name="30 min", value=30)]
+)
+async def monitor(interaction: discord.Interaction, action: str, interval: int):
+    await interaction.response.defer(ephemeral=True)
+    user_id = str(interaction.user.id)
+    if action == "on":
+        if user_id not in user_zips:
+            await interaction.followup.send("❌ Use /setzip first!", ephemeral=True)
+            return
+        monitored[user_id] = {"zip": user_zips[user_id], "interval": interval, "products": []}
+        save_data()
+        await interaction.followup.send(f"✅ Monitoring **ON** — every **{interval} minutes**", ephemeral=False)
+    else:
+        monitored.pop(user_id, None)
+        save_data()
+        await interaction.followup.send("✅ Monitoring **OFF**", ephemeral=True)
+
+@tasks.loop(minutes=1)
+async def stock_monitor():
+    now = datetime.now()
+    for user_id, info in list(monitored.items()):
+        zip_code = info["zip"]
+        interval_min = info.get("interval", 10)
+        last_time = datetime.fromisoformat(last_check.get(user_id, "2000-01-01"))
+        if (now - last_time).total_seconds() / 60 < interval_min:
+            continue
+
+        user_products = info.get("products", list(PRODUCTS.keys()))
+        changed = False
+        alert_msg = f"🟢 **Restock Alert** — ZIP **{zip_code}**\n"
+
+        for name in user_products:
+            ids = PRODUCTS[name]
+            results = await check_product(zip_code, ids)
+            current_in_stock = any("IN STOCK" in res or "Pickup" in res for res in results)
+            was_in_stock = last_stock.get(user_id, {}).get(name, False)
+            if current_in_stock and not was_in_stock:
+                alert_msg += f"**[{name}]({ids['pokemoncenter']})** → ✅\n"
+                changed = True
+            last_stock.setdefault(user_id, {})[name] = current_in_stock
+
+        if changed:
+            try:
+                user = await client.fetch_user(int(user_id))
+                await user.send(f"<@{user_id}>\n{alert_msg}")
+            except:
+                pass
+
+        last_check[user_id] = now.isoformat()
+        save_data()
 
 @client.event
 async def on_ready():
     await tree.sync()
     stock_monitor.start()
-    print(f"✅ Bot online — {client.user} | Clickable retailer links active")
+    print(f"✅ Bot online — {client.user} | Clickable retailer links + clean layout")
 
 client.run(os.getenv("TOKEN"))
