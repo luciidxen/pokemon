@@ -192,4 +192,4 @@ async def on_ready():
 async def stock_monitor():
     pass  # monitoring logic is ready
 
-client.run("TOKEN")   # ← replace with your real token
+client.run("YOUR_BOT_TOKEN_HERE")   # ← replace with your real token
