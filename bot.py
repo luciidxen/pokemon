@@ -45,9 +45,17 @@ PRODUCTS = {
 semaphore = asyncio.Semaphore(10)
 
 async def fetch(url, params=None, timeout=4):
+    proxy = f"http://{os.getenv('PROXY_USER')}:{os.getenv('PROXY_PASS')}@{os.getenv('PROXY_HOST')}"
     async with semaphore:
         try:
-            return await asyncio.to_thread(requests.get, url, params=params, headers={"User-Agent": "Mozilla/5.0"}, timeout=timeout)
+            return await asyncio.to_thread(
+                requests.get,
+                url,
+                params=params,
+                headers={"User-Agent": "Mozilla/5.0"},
+                proxies={"http": proxy, "https": proxy},
+                timeout=timeout
+            )
         except:
             return None
 
