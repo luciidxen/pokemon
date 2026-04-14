@@ -130,7 +130,7 @@ async def setzip(interaction: discord.Interaction, zip_code: str):
     save_data()
     await interaction.followup.send(f"✅ ZIP saved: **{zip_code}**", ephemeral=True)
 
-@tree.command(name="checkstock", description="Manual stock + price check (all products)")
+@tree.command(name="checkstock", description="Manual stock + price check")
 async def checkstock(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=False)
     user_id = str(interaction.user.id)
@@ -150,8 +150,8 @@ async def checkstock(interaction: discord.Interaction):
         embed.add_field(name=name, value=value, inline=False)
     await interaction.followup.send(embed=embed)
 
-# Per-product selection
-@tree.command(name="addproduct", description="Add a product to your personal monitor list")
+# Per-product dropdowns
+@tree.command(name="addproduct", description="Add a product to your monitor list")
 @app_commands.choices(product=[app_commands.Choice(name=name, value=name) for name in PRODUCTS.keys()])
 async def addproduct(interaction: discord.Interaction, product: str):
     await interaction.response.defer(ephemeral=True)
@@ -188,16 +188,17 @@ async def myproducts(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
     user_id = str(interaction.user.id)
     if user_id not in monitored or not monitored[user_id].get("products"):
-        await interaction.followup.send("❌ No products selected yet.\nUse /addproduct", ephemeral=True)
+        await interaction.followup.send("❌ No products selected.\nUse /addproduct", ephemeral=True)
         return
     await interaction.followup.send("**Your monitored products:**\n" + "\n".join(f"• {p}" for p in monitored[user_id]["products"]), ephemeral=True)
 
-# Monitor command (unchanged)
-@tree.command(name="monitor", description="Turn monitoring on/off")
-@app_commands.choices(action=[app_commands.Choice(name="on", value="on"), app_commands.Choice(name="off", value="off")],
-                      interval=[app_commands.Choice(name="1 min", value=1), app_commands.Choice(name="3 min", value=3),
-                                app_commands.Choice(name="5 min", value=5), app_commands.Choice(name="10 min", value=10),
-                                app_commands.Choice(name="30 min", value=30)])
+@tree.command(name="monitor", description="Turn monitoring on/off + interval")
+@app_commands.choices(
+    action=[app_commands.Choice(name="on", value="on"), app_commands.Choice(name="off", value="off")],
+    interval=[app_commands.Choice(name="1 min", value=1), app_commands.Choice(name="3 min", value=3),
+              app_commands.Choice(name="5 min", value=5), app_commands.Choice(name="10 min", value=10),
+              app_commands.Choice(name="30 min", value=30)]
+)
 async def monitor(interaction: discord.Interaction, action: str, interval: int):
     await interaction.response.defer(ephemeral=True)
     user_id = str(interaction.user.id)
@@ -212,6 +213,40 @@ async def monitor(interaction: discord.Interaction, action: str, interval: int):
         monitored.pop(user_id, None)
         save_data()
         await interaction.followup.send("✅ Monitoring OFF", ephemeral=True)
+
+@tasks.loop(minutes=1)
+async def stock_monitor():
+    now = datetime.now()
+    for user_id, info in list(monitored.items()):
+        zip_code = info["zip"]
+        interval_min = info.get("interval", 10)
+        last_time = datetime.fromisoformat(last_check.get(user_id, "2000-01-01"))
+        if (now - last_time).total_seconds() / 60 < interval_min:
+            continue
+
+        user_products = info.get("products", list(PRODUCTS.keys()))
+        changed = False
+        alert_msg = f"🟢 **Stock Alert** — ZIP **{zip_code}**\n"
+
+        for name in user_products:
+            ids = PRODUCTS[name]
+            results = await check_product(zip_code, ids)
+            current_in_stock = any("IN STOCK" in res or "Pickup Available" in res for res in results)
+            was_in_stock = last_stock.get(user_id, {}).get(name, False)
+            if current_in_stock and not was_in_stock:
+                alert_msg += f"**{name}** → ✅ IN STOCK / Pickup\n"
+                changed = True
+            last_stock.setdefault(user_id, {})[name] = current_in_stock
+
+        if changed:
+            try:
+                user = await client.fetch_user(int(user_id))
+                await user.send(f"<@{user_id}>\n{alert_msg}")
+            except:
+                pass
+
+        last_check[user_id] = now.isoformat()
+        save_data()
 
 @client.event
 async def on_ready():
